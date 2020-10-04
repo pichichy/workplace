@@ -18,8 +18,14 @@
     },
     "homepage": "https://github.com/pichichy/ProjectWorkplace#readme",
     "dependencies": {
+        "@google-cloud/storage": "^5.2.0",
         "axios": "^0.19.2",
+        "bcrypt": "^5.0.0",
+        "body-parser": "^1.19.0",
+        "crypto-js": "^4.0.0",
         "express": "^4.17.1",
-        "mongoose": "^5.9.27"
+        "mongoose": "^5.9.27",
+        "pg": "^8.3.0",
+        "request": "^2.88.2"
     }
 }

@@ -1,76 +1,115 @@
-const axios = require('../axios/instance');
-const Group = require('../models/group');
+require('../config/config');
+const { decrypt } = require('../util/crypto');
+const { download } = require('../download-images/image-downloader');
+const { getInstance } = require('../axios/instance');
+const { insertGroupBd, deleteGroupsBd, selectParameters } = require('../database/database');
+const { Storage } = require('@google-cloud/storage');
+const path = require('path');
+const fs = require('fs');
 
-const getGroups = async(url, callback) => {
-    try {
-        const resp = await axios.getInstance(url);
-        const data = resp.data.data;
-        const next = resp.data.paging.next;
-        callback(null, {
-            data,
-            next
-        });
-    } catch (err) {
-        callback(err);
-    }
-};
+const ruta = './server/download-images/images/';
+const url = `https://graph.workplace.com/community/groups?fields=id,name,privacy,purpose,cover,description,icon,owner,post_requires_admin_approval,post_permissions,join_setting`;
 
-const getAllGroups = async(callback) => {
-    let url = `https://graph.workplace.com/community/groups?fields=id,name,privacy,purpose,cover,description,icon,owner,post_requires_admin_approval,post_permissions,join_setting`;;
-    try {
-        let array = [];
-        let cicle = 1;
-        do {
-            console.log(`Ciclo: ${cicle}`);
-            await getGroups(url, (err, data) => {
-                if (err) {
-                    console.log('throw new Error(err);');
-                    throw err;
-                }
-                array = array.concat(data.data);
-                url = data.next;
+const storage = new Storage({
+    projectId: PROJECTID,
+    keyFilename: path.join(__dirname, KEYFILENAME)
+});
 
-            })
-            cicle++;
-            // } while (url)
-        } while (cicle < 1)
+const bucket = storage.bucket(NAMEBUCKET);
 
-        //console.log(array);
 
-        // await saveGroups(array);
+// const getMembers = async(id, token) => {
+//     const url = `https://graph.facebook.com/${id}/members?fields=name,id,administrator,moderator,email`;
+//     const resp = await getInstance(url, token);
+//     const members = resp.data.data;
 
-        callback(null, array);
-    } catch (err) {
-        console.log(err);
-        callback(err);
-    }
+//     return {
+//         members
+//     };
+// };
+
+// const promiseMembers = async(group, token) => {
+
+//     let promises = [];
+
+//     for (const data of group) {
+//         promises.push(getMembers(data.id, id_instance, token));
+//     }
+
+//     return new Promise((resolve, reject) => {
+//         Promise.all(promises)
+//             .then((res) => {
+//                 for (const members of res) {
+//                     insertGroupMembersBd(members);
+//                 }
+//                 resolve(res);
+//             })
+//             .catch((err) => {
+//                 reject(err);
+//             });
+//     });
+// }
+
+const getGroups = async(url, token) => {
+
+    const resp = await getInstance(url, token);
+    await saveGroupsPostgres(resp.data.data, token);
+    return resp.data.paging.next;
+
 }
 
-const saveGroups = (groups) => {
-    for (let i = 0; i < groups.length; i++) {
-        let group = new Group({
-            id_group: groups[i].id,
-            name: groups[i].name,
-            privacy: groups[i].privacy,
-            purpose: groups[i].purpose,
-            cover: {
-                cover_id: groups[i].cover.cover_id,
-                offset_x: groups[i].cover.offset_x,
-                offset_y: groups[i].cover.offset_y,
-                source: groups[i].cover.source,
-                id: groups[i].cover.id,
-            }
-        });
+const saveGroupsPostgres = async(groups, token) => {
 
-        group.save((err, groupDB) => {
-            if (err) {
-                console.log('error al salvar');
-                console.log(err);
-            } else {
-                console.log('save OK');
-            }
-        });
+    for (let i = 0; i < groups.length; i++) {
+
+
+        //let members = await getMembers(groups[i].id, token);
+
+        //let groupNew = groups[i];
+        let gcpCoverSource = '';
+
+        if (groups[i].cover) {
+            const imageUrl = groups[i].cover.source;
+            const filename = ruta.concat(`${groups[i].id}.jpg`);
+            //groupNew.cover.source = `https://storage.googleapis.com/${NAMEBUCKET}/${groups[i].id}.jpg`;
+            gcpCoverSource = `https://storage.googleapis.com/${NAMEBUCKET}/${groups[i].id}.jpg`;
+
+            await download(imageUrl, filename, () => {
+                bucket.upload(filename, {}, () => {
+                    fs.unlinkSync(filename);
+                });
+            });
+        }
+
+        await insertGroupBd(groups[i], gcpCoverSource);
     }
+
+}
+
+const getAllGroups = async(id, callback) => {
+
+    let next = url;
+    let cicle = 1;
+
+    try {
+        const data = await selectParameters(id);
+        if (!data) {
+            throw new Error('error querying parameters')
+        }
+        const token = decrypt(data);
+        await deleteGroupsBd();
+        do {
+            console.log(`Ciclo: ${cicle}`);
+            next = await getGroups(next, token);
+            cicle++;
+        } while (next);
+
+        callback(null);
+
+    } catch (error) {
+        callback(error);
+    }
+
 }
 
 module.exports = {
